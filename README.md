@@ -1,4 +1,4 @@
-# The Shattered Sigil
+# The Shattered Shard
 ## Player Guide
 
 The Aegis Sigil protected the wizard's tower until an unknown adversary broke it
