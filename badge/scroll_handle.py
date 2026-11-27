@@ -1,6 +1,14 @@
-# scroll_codexmafia.py  --  rainbow scrolling text for a WS2812 (NeoPixel) matrix
-# MicroPython (ESP32-S3).  Scrolls "CodexMafia" across the panel with an animated
-# rainbow so every column cycles hue over time ("rgb af").
+# scroll_handle.py  --  rainbow scrolling player handle for a WS2812 (NeoPixel) matrix
+# MicroPython (ESP32-S3).  Scrolls the player's handle across the panel with an
+# animated rainbow so every column cycles hue over time.
+#
+# Where the handle comes from: the badge web UI (/profile) saves it to NVS
+# namespace "spellbook", key "handle". NAMESPACE and KEY below must match the
+# firmware's NVS key exactly. If no handle is set, DEFAULT_TEXT is scrolled
+# instead. (The firmware itself shows the Wi-Fi SSID in that case.)
+#
+# Font note: FONT only covers the glyphs the original text needed. Characters
+# without a glyph render as blank columns.
 #
 # ---- CONFIGURE THESE FOUR THINGS FOR YOUR PANEL --------------------------------
 DATA_PIN   = 17      # confirmed from firmware: "LED panel: GPIO17"
@@ -14,13 +22,19 @@ SPEED_MS   = 55      # ms per scroll step (lower = faster)
 
 import time
 
+import esp32
 import neopixel
 from machine import Pin
 
-TEXT = "CodexMafia"
+# Must match the firmware's NVS write from the /profile page.
+NVS_NAMESPACE = "spellbook"
+NVS_KEY = "handle"
+MAX_HANDLE = 24          # the firmware's /profile form caps the handle at 24 chars
+NVS_BUF_BYTES = 64       # MicroPython has no blob size probe, so read into a bigger buffer
+DEFAULT_TEXT = "APPRENTICE"
 
 # 5x7 font, column-major: each glyph = 5 columns, each column a 7-bit value
-# (bit0 = top row, bit6 = bottom row). Hand-built for the letters in "CodexMafia".
+# (bit0 = top row, bit6 = bottom row). Hand-built glyphs; see the font note above.
 FONT = {
     'C': [0x3E,0x41,0x41,0x41,0x22],
     'M': [0x7F,0x02,0x0C,0x02,0x7F],
@@ -84,9 +98,26 @@ def _build_columns(text):
         cols.append(0x00)  # 1px gap between letters
     return cols
 
-def scroll(text=TEXT, loops=0):
-    """Scroll `text`. loops=0 -> forever. Ctrl-C to stop."""
-    cols = _build_columns(text)
+def read_handle():
+    """Return the stored handle, or DEFAULT_TEXT if it is missing or empty.
+
+    esp32.NVS.get_blob raises OSError when the key is absent or the buffer is too
+    small, so both cases fall back to DEFAULT_TEXT. Only printable ASCII is kept,
+    because the /profile form allows ASCII only.
+    """
+    try:
+        nvs = esp32.NVS(NVS_NAMESPACE)
+        buf = bytearray(NVS_BUF_BYTES)
+        n = nvs.get_blob(NVS_KEY, buf)
+    except OSError:
+        return DEFAULT_TEXT
+    raw = bytes(buf[:n]).rstrip(b"\x00")
+    text = "".join(chr(b) for b in raw if 32 <= b < 127)[:MAX_HANDLE].strip()
+    return text or DEFAULT_TEXT
+
+def scroll(text=None, loops=0):
+    """Scroll the handle (or `text` if given). loops=0 -> forever. Ctrl-C to stop."""
+    cols = _build_columns(text if text is not None else read_handle())
     hue = 0.0
     n = 0
     try:
